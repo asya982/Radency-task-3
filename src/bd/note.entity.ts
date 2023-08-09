@@ -1,6 +1,6 @@
 import { Table, Column, Model, DataType } from 'sequelize-typescript';
 
-@Table
+@Table({ timestamps: false })
 export class Note extends Model {
   @Column({
     primaryKey: true,

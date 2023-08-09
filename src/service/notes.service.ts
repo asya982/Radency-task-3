@@ -1,7 +1,10 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { EditNoteDto } from 'src/dto/noteEdit.dto';
 import { Category, CategoryRow, NoteItem } from 'src/helpers/types';
-import { Note } from '../bd/note.entity'; 
+import { Note } from '../bd/note.entity';
+import { CreateNoteDto } from 'src/dto/noteCreate.dto';
+import { findDates, publishDate } from 'src/helpers/helpers';
+import { NOTE_NOT_FOUND } from 'src/helpers/constants';
 
 @Injectable()
 export class NotesService {
@@ -13,50 +16,65 @@ export class NotesService {
     { id: 2, name: 'Idea' },
   ];
 
- async  getAllNotes():  Promise<Note[]> {
-    return this.noteRepository.findAll<Note>();
+  async getAllNotes(): Promise<Note[]> {
+    return this.noteRepository.findAll<Note>({
+      order: [['id', 'ASC']],
+    });
   }
 
-  // getNoteById(id: number): NoteItem | undefined {
-  //   return this.noteList.find((el) => el.id === id);
-  // }
+  async getNoteById(id: number): Promise<Note> | null {
+    const note = await this.noteRepository.findByPk(id);
+    if (!note) {
+      throw new NotFoundException(NOTE_NOT_FOUND(id));
+    }
+    return note;
+  }
 
-  // addNewNote(note: NoteItem): NoteItem {
-  //   this.noteList.push(note);
-  //   return note;
-  // }
+  async addNewNote(note: CreateNoteDto): Promise<Note> {
+    const newNote = {
+      ...note,
+      created: publishDate(),
+      isActive: true,
+      dates: findDates(note.content),
+    };
+    return this.noteRepository.create(newNote);
+  }
 
-  // editNote(id: number, editData: EditNoteDto): NoteItem {
-  //   this.noteList = this.noteList.map((note) => {
-  //     if (note.id === id) {
-  //       return {
-  //         ...note,
-  //         ...editData,
-  //       };
-  //     }
-  //     return note;
-  //   });
-  //   return this.noteList.find((el) => el.id === id);
-  // }
+  async editNote(id: number, editData: EditNoteDto): Promise<[number, Note[]]> {
+    const editWithDates = { ...editData, dates: findDates(editData.content) };
+    const updatedNote = await this.noteRepository.update(editWithDates, {
+      where: { id },
+      returning: true,
+    });
 
-  // deleteNote(id: number): boolean {
-  //   if (!this.noteList.find((el) => el.id === id)) {
-  //     return false;
-  //   }
+    if (!updatedNote[0]) {
+      throw new NotFoundException(NOTE_NOT_FOUND(id));
+    }
 
-  //   this.noteList = this.noteList.filter((el) => el.id !== id);
-  //   return true;
-  // }
+    return updatedNote;
+  }
 
-  // getStats(): CategoryRow[] {
-  //   return this.categories.map((category) => ({
-  //     ...category,
-  //     active: this.noteList.filter(
-  //       (el) => el.isActive && el.category === category.id,
-  //     ).length,
-  //     archived: this.noteList.filter(
-  //       (el) => !el.isActive && el.category === category.id,
-  //     ).length,
-  //   }));
-  // }
+  async deleteNote(id: number): Promise<void> {
+    const deletedRows = await this.noteRepository.destroy({
+      where: { id },
+    });
+
+    if (!deletedRows) {
+      throw new NotFoundException(NOTE_NOT_FOUND(id));
+    }
+  }
+
+  async getStats(): Promise<CategoryRow[]> {
+    const stats = this.categories.map(async (category) => ({
+      ...category,
+      active: await this.noteRepository.count({
+        where: { isActive: true, category: category.id },
+      }),
+      archived: await this.noteRepository.count({
+        where: { isActive: false, category: category.id },
+      }),
+    }));
+
+    return Promise.all(stats);
+  }
 }
