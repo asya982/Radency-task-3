@@ -1,0 +1,30 @@
+version: '3.9'
+services:
+
+  postgres_db:
+    image: 'postgres:latest'
+    container_name: postgres_db
+    ports:
+      - '5432:5432'
+    environment:
+      - POSTGRES_HOST=postgres_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgreSQL_DB
+      - POSTGRES_DB=Your_Little_Notes_DB
+    command: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  nestjs_server:
+    image: 'nestjs-image:latest'
+    container_name: nestjs_server
+    restart: always
+    ports:
+      - '3000:3000'
+    depends_on:
+      - postgres_db
+    env_file:
+      - .env
+volumes:
+  postgres_data:

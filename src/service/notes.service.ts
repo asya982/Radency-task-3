@@ -1,75 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { EditNoteDto } from 'src/dto/noteEdit.dto';
 import { Category, CategoryRow, NoteItem } from 'src/helpers/types';
+import { Note } from '../bd/note.entity';
+import { CreateNoteDto } from 'src/dto/noteCreate.dto';
+import { findDates, publishDate } from 'src/helpers/helpers';
+import { NOTE_NOT_FOUND } from 'src/helpers/constants';
 
 @Injectable()
 export class NotesService {
-  private noteList: NoteItem[] = [
-    {
-      id: 0,
-      name: 'Meeting Reminder',
-      created: '25/07/2023',
-      category: 0,
-      content: "Don't forget the team meeting at 3 PM today.",
-      dates: [],
-      isActive: true,
-    },
-    {
-      id: 1,
-      name: 'Grocery List',
-      created: '25/07/2023',
-      category: 0,
-      content: 'Buy milk, eggs, bread, and fruits.',
-      dates: [],
-      isActive: true,
-    },
-    {
-      id: 2,
-      name: 'Book Recommendation',
-      created: '25/07/2023',
-      category: 2,
-      content: "Read 'The Alchemist' by Paulo Coelho.",
-      dates: [],
-      isActive: true,
-    },
-    {
-      id: 3,
-      name: 'Gift Ideas',
-      created: '25/07/2023',
-      category: 2,
-      content: "Think of gift ideas for mom's birthday.",
-      dates: [],
-      isActive: true,
-    },
-    {
-      id: 4,
-      name: 'Project Deadline',
-      created: '25/07/2023',
-      category: 1,
-      content: 'Finish the report and submit it by Friday(10/08/2023)',
-      dates: ['10/08/2023'],
-      isActive: true,
-    },
-    {
-      id: 5,
-      name: 'Travel Plans',
-      created: '25/07/2023',
-      category: 1,
-      content:
-        'Research and plan for the summer vacation during 10/08/2023 26/07/2023',
-      dates: ['10/08/2023', '26/07/2023'],
-      isActive: true,
-    },
-    {
-      id: 6,
-      name: 'Fitness Goals',
-      created: '25/07/2023',
-      category: 0,
-      content: 'Go for a jog and eat a healthy dinner.',
-      dates: [],
-      isActive: true,
-    },
-  ];
+  constructor(@Inject('NOTE_REPOSITORY') private noteRepository: typeof Note) {}
 
   private readonly categories: Category[] = [
     { id: 0, name: 'Task' },
@@ -77,50 +16,65 @@ export class NotesService {
     { id: 2, name: 'Idea' },
   ];
 
-  getAllNotes(): NoteItem[] {
-    return this.noteList;
+  async getAllNotes(): Promise<Note[]> {
+    return this.noteRepository.findAll<Note>({
+      order: [['id', 'ASC']],
+    });
   }
 
-  getNoteById(id: number): NoteItem | undefined {
-    return this.noteList.find((el) => el.id === id);
-  }
-
-  addNewNote(note: NoteItem): NoteItem {
-    this.noteList.push(note);
+  async getNoteById(id: number): Promise<Note> | null {
+    const note = await this.noteRepository.findByPk(id);
+    if (!note) {
+      throw new NotFoundException(NOTE_NOT_FOUND(id));
+    }
     return note;
   }
 
-  editNote(id: number, editData: EditNoteDto): NoteItem {
-    this.noteList = this.noteList.map((note) => {
-      if (note.id === id) {
-        return {
-          ...note,
-          ...editData,
-        };
-      }
-      return note;
-    });
-    return this.noteList.find((el) => el.id === id);
+  async addNewNote(note: CreateNoteDto): Promise<Note> {
+    const newNote = {
+      ...note,
+      created: publishDate(),
+      isActive: true,
+      dates: findDates(note.content),
+    };
+    return this.noteRepository.create(newNote);
   }
 
-  deleteNote(id: number): boolean {
-    if (!this.noteList.find((el) => el.id === id)) {
-      return false;
+  async editNote(id: number, editData: EditNoteDto): Promise<[number, Note[]]> {
+    const editWithDates = { ...editData, dates: findDates(editData.content) };
+    const updatedNote = await this.noteRepository.update(editWithDates, {
+      where: { id },
+      returning: true,
+    });
+
+    if (!updatedNote[0]) {
+      throw new NotFoundException(NOTE_NOT_FOUND(id));
     }
 
-    this.noteList = this.noteList.filter((el) => el.id !== id);
-    return true;
+    return updatedNote;
   }
 
-  getStats(): CategoryRow[] {
-    return this.categories.map((category) => ({
+  async deleteNote(id: number): Promise<void> {
+    const deletedRows = await this.noteRepository.destroy({
+      where: { id },
+    });
+
+    if (!deletedRows) {
+      throw new NotFoundException(NOTE_NOT_FOUND(id));
+    }
+  }
+
+  async getStats(): Promise<CategoryRow[]> {
+    const stats = this.categories.map(async (category) => ({
       ...category,
-      active: this.noteList.filter(
-        (el) => el.isActive && el.category === category.id,
-      ).length,
-      archived: this.noteList.filter(
-        (el) => !el.isActive && el.category === category.id,
-      ).length,
+      active: await this.noteRepository.count({
+        where: { isActive: true, category: category.id },
+      }),
+      archived: await this.noteRepository.count({
+        where: { isActive: false, category: category.id },
+      }),
     }));
+
+    return Promise.all(stats);
   }
 }
